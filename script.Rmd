@@ -9,25 +9,32 @@ output: html_document
 setwd("/Users/sunyoon/Desktop/myrepo/")
 
 library(rtweet)
+library(RedditExtractoR)
+library(tidytext)
+
 ```
 
 ## Introduction
 
-In this anaylsis I will try to find characteristics of users who speak of 
+In this analysis I will try to find what sort of topics are hot among "changemyview" subreddit, and do a sentimental analysis. 
 
 ```{r tweet}
 
+top.cmv.urls <- find_thread_urls(subreddit="changemyview", sort_by="top")
 
-
+head(top.cmv.urls$title)
 
 ```
 
 ## Including Plots
 
-You can also embed plots, for example:
+For this, you get the comments to the submissions that I pulled above URLS. 
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r comments, echo=FALSE, cache=T}
+
+comments.cmv <- get_thread_content(top.cmv.urls$url)
+
+first5 <- get_thread_
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+

@@ -1,0 +1,125 @@
+---
+title: "R2. Homework 2"
+author: "SunJung Yoon"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+tags: [nothing, nothingness]
+output: 
+  html_document:
+    theme: cerulean 
+    highlight: pygments
+
+---
+
+# Census Longitudinal Employer-Household Dynamics
+
+In this census dataset, the LEHD Origin-Destination Employment Statistics (LODES) represents home to work job dynamics (job counts) associated with home Census Block (FIPS codes) and work Census Block. 
+
+I have skipped loading all dataset in this homework. For a brief version, I have only included Maryland and DC in 2019. In the skipped steps, I have already imported 2019 LODES data from the census API for all states, using `lehdr` package used for LEHD data. In the following codes, I will combine aux and main dataset. In the OD file, there are "aux" and "main" files. Aux file includes jobs with the workplace in the state and the residence outside of the state. Main file includes jobs within the same state. So, to get the complete picture of the whole United States, we have to combine both of them. 
+
+Below, w_county represents work FIPS codes and h_county represents home FIPS codes. S000 represents number of total job. For instance, if a worker lives in FIPS 1 and goes to work in FIPS 2, then that worker is counted in between these FIPS codes.
+
+```{r}
+setwd("/Users/sunyoon/Desktop/research")
+library(tidyverse)
+
+# load in clean data of aux and main dataset
+aux <- read.csv("data/lodes/main2019.csv")
+main <- read.csv("data/lodes/aux2019.csv")
+# combine them all, select DC MD and VA and necessary variables only. 
+all <- rbind(main, aux) %>%
+  filter(state %in% c("DC", "MD")) %>%
+  select(year:S000, type)
+
+# create duplicates (W-H and H-W key)
+all %<>%
+  rowwise %>%
+  mutate(key = paste(sort(c(w_county, h_county)), collapse="_")) %>%  # key: w_county/h_county sort out dups
+  as_tibble()
+
+head(all, 5)
+
+```
+
+
+Next, I will find the inflow and outflow of the data. To do this, I need to find counties that are interchangeable. For instance, there are cases where total job is in A to B, and then B to A. If those are spotted, I would proceed to make a subset of those and generate inflow and outflow variables.
+
+```{r}
+duplicates <- all %>%
+  select(type, key, year, w_county, h_county, S000) %>%
+  group_by(key) %>%
+  filter(n() > 1) %>%  # are there dups by key? yes. there are. 
+  ungroup() %>%
+  mutate(id=key) %>%    # make another id var by key. 
+  separate(id, c("h","w"), sep="_") %>%   # and separate into h and w (home/work)
+  mutate(inflow=ifelse(h_county==h, S000, 0))   # inflow is about how many people are going into "home" county
+
+# create the inflow of commuting from the duplicates. 
+inflow <- duplicates %>%
+  filter(inflow!=0) %>%
+  select(year, h, w, inflow) %>%
+  rename(h_county=h,
+         w_county=w)
+
+# create the outflow of commuting from the duplicates. 
+outflow <- duplicates %>%
+  filter(inflow==0) %>%
+  mutate(outflow=S000) %>%
+  select(year, h, w, outflow) %>%
+  rename(h_county=h,
+         w_county=w)
+
+```
+
+
+After creating the inflow and outflow datasets, I will merge them to create a new data that has both inflow and outflow. In addition, I created absolute value of traffic between two FIPS codes. 
+
+```{r}
+io <- left_join(inflow, outflow, by=c("h_county","w_county", "year")) %>%
+  mutate(h_county = as.integer(h_county),
+         w_county = as.integer(w_county),
+         outflow = as.numeric(outflow),
+         intraffic = abs(outflow-inflow))
+
+head(io, 5)
+```
+
+
+# Graphing Maryland and DC communitng flow map
+
+In this section, I will show how I would graph county maps with the job flow. I call in `sf` library for graph preparation and download tract (geometry) from Census website for DC and MD.
+
+```{r}
+# https://shiandy.com/post/2020/11/02/mapping-lat-long-to-fips/
+# install.packages("sf")
+
+library(sf)
+
+dc.tract <- st_read("/Users/sunyoon/Desktop/research/data/censustract/cb_2018_11_tract_500k.shp", quiet = TRUE)
+md.tract <- st_read("/Users/sunyoon/Desktop/research/data/censustract/cb_2018_24_tract_500k.shp", quiet = TRUE)
+
+```
+
+
+Then, I clean up both tract and merge with the inflow and outflow data set. 
+
+```{r}
+tract <- rbind(dc.tract, md.tract) %>%
+  mutate(fips = as.integer(paste0(STATEFP,COUNTYFP))) %>%
+  select(fips, geometry)
+# plot(tract$geometry)
+
+io.tract <- st_as_sf(left_join(io, tract, by=c("h_county"="fips"))) %>%
+  mutate(lintraffic = log(abs(intraffic)))
+
+```
+
+
+Now, graph the map
+```{r, cache=T}
+library(ggplot2)
+ggplot(io.tract, aes(fill=lintraffic)) +
+  geom_sf() +
+  theme_void()
+
+```
+
