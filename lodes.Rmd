@@ -1,5 +1,5 @@
 ---
-title: "R2. Homework 2"
+title: "ARCOS & LODES"
 author: "SunJung Yoon"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 tags: [nothing, nothingness]
@@ -123,3 +123,99 @@ ggplot(io.tract, aes(fill=lintraffic)) +
 
 ```
 
+
+
+Now, I'm going to try to draw lines between these commuting pattern
+
+```{r commute_map}
+
+library(ggrepel)
+library(ggplot2)
+
+
+
+
+
+main_od <- all %>%
+  filter(year==2019) %>%
+  select(w_county, h_county, S000) %>%
+  rename(o=h_county,
+         d=w_county) %>%
+  mutate(o=str_pad(o, width=5, side="left", pad="0"),
+         d=str_pad(d, width=5, side="left", pad="0"))
+
+
+# Maryland shape file from tigris and calculate centroid
+# install.packages("tigris")
+library(tigris)
+county_zones <- counties() %>%
+  select(GEOID, geometry)
+
+# first the zone_attr from main_od is by origin fips code. 
+zones_attr <- main_od %>%
+  group_by(o) %>%
+  summarize_if(is.numeric, sum) %>%
+  dplyr::rename(GEOID=o)
+
+
+```
+
+
+
+```{r}
+# check if the GEOID is all there in the maryland_zones
+summary(zones_attr$GEOID %in% county_zones$GEOID)
+
+zones_joined <- inner_join(county_zones, zones_attr, by="GEOID")
+sum(zones_joined$S000)
+
+# here the zones_od is merged by the destination counties. 
+zones_od <- main_od %>%
+  group_by(d) %>%
+  summarize_if(is.numeric, sum) %>%
+  dplyr::select(GEOID=d, S000_dest=S000) %>%
+  inner_join(zones_joined, ., by="GEOID")
+```
+
+
+
+
+```{r, cache=TRUE}
+# use Tmap to figure out where people travel most to and from
+# install.packages("tmap")
+library(tmap)
+qtm(zones_od, c("S000", "S000_dest")) +
+  tm_layout(panel.labels = c("Origin", "Destination"))
+
+# select top 5 cities
+od_top5 <- indiana_od %>%
+  arrange(desc(S000)) %>%
+  top_n(5, wt=S000)
+
+# filter out the interzonal (A to B) and intrazonal (A to A)
+od_intra <- filter(main_od, o==d)
+od_inter <- filter(main_od, o!=d)
+
+#stplanr package
+# install.packages("stplanr")
+library(stplanr)
+
+tmap_mode("plot")
+desire_lines <- od2line(od_inter, main_od)
+desire_lines_top5 <- od2line(od_top5, main_od)
+qtm(desire_lines, lines.lwd="S000")
+
+# tmaptools::palette_explorer()
+tm_shape(desire_lines) +
+  tm_lines(palette = "plasma", breaks = c(0,5, 100, 500, 10000, 20000, 30000, 80000),
+           lwd = "S000",
+           scale = 9,
+           title.lwd = "Number of trips",
+           alpha = 0.6,
+           col = "S000",
+           title = "All travel"
+  ) +
+  tm_shape(desire_lines_top5) +
+  tm_lines(lwd = 5, col = "black", alpha = 0.7) +
+  tm_scale_bar()
+```
